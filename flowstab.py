@@ -10,19 +10,16 @@ from scipy import ndimage
 
 lk_params = dict(winSize = (15, 15),
                  maxLevel = 2,
-                 criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03),
-                 flags = cv2.OPTFLOW_LK_GET_MIN_EIGENVALS,
-                 minEigThreshold = 0.001)
+                 criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 
 lk_params2 = dict(winSize = (15, 15),
                  maxLevel = 2,
                  criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03),
-                 flags = cv2.OPTFLOW_LK_GET_MIN_EIGENVALS | cv2.OPTFLOW_USE_INITIAL_FLOW,
-                 minEigThreshold = 0.001)
+                 flags = cv2.OPTFLOW_USE_INITIAL_FLOW)
 
 def rich_features(img, divisions = 4):
-    feature_params = dict(maxCorners = 1500//divisions**2,
-                          qualityLevel = 0.05,
+    feature_params = dict(maxCorners = 2000//divisions**2,
+                          qualityLevel = 0.02,
                           minDistance = 5,
                           blockSize = 7 )
     features = []
@@ -64,7 +61,7 @@ def hsv_vis(flow):
     img = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
     return img
 
-def compute_meshflow(vid):
+def compute_meshflow(vid, divs):
     vid_length = vid.get(cv2.CAP_PROP_FRAME_COUNT)
     meshflow = np.zeros((int(vid_length), 16, 16, 2))
 
@@ -79,12 +76,12 @@ def compute_meshflow(vid):
             return meshflow
         frame_count += 1
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        last_points, segments = rich_features(last_gray, 4)
+        last_points, segments = rich_features(last_gray, divs)
         new_points, st, _err = cv2.calcOpticalFlowPyrLK(last_gray, frame_gray, last_points, None, **lk_params)
         reverse_points, st, _err = cv2.calcOpticalFlowPyrLK(frame_gray, last_gray, new_points, None, **lk_params)
         d = abs(last_points-reverse_points).reshape(-1,2).max(-1)
         passed = np.logical_and(d < 1, (st.reshape(-1) > 0))
-        global_homography, good = cv2.findHomography(last_points, new_points, cv2.RANSAC, 8)
+        global_homography, good = cv2.findHomography(last_points, new_points, cv2.RANSAC, 6)
         global_points = cv2.perspectiveTransform(last_points, global_homography)
         new_points = global_points.copy()
         new_points, _st, _err = cv2.calcOpticalFlowPyrLK(last_gray, frame_gray, last_points, new_points, **lk_params2)
@@ -92,7 +89,7 @@ def compute_meshflow(vid):
         for segment in segments:
             ret_, good = cv2.findHomography(last_points[slice(*segment)], new_points[slice(*segment)], cv2.RANSAC, 2)
             inlier_mask[slice(*segment)] = good[:,0]
-        global_homography, good = cv2.findHomography(last_points, new_points, cv2.RANSAC, 8)
+        global_homography, good = cv2.findHomography(last_points, new_points, cv2.RANSAC, 6)
         global_points = cv2.perspectiveTransform(last_points, global_homography)
 
         np.bitwise_and(inlier_mask, passed)
@@ -177,6 +174,7 @@ def main():
     argparser.add_argument('-f', '--flow', help="Precalculated Meshflow file")
     argparser.add_argument('-s', '--scale', help="Gaussian kernel size", type=int, default=10)
     argparser.add_argument('-c', '--crop', help="Crop output", type=int, default=10)
+    argparser.add_argument('-d', '--divisions', help="Feature detection divisions", type=int, default=1)
     args = argparser.parse_args()
 
     # open input
@@ -185,7 +183,7 @@ def main():
     height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     if args.flow is None:
-        meshflow = compute_meshflow(vid)
+        meshflow = compute_meshflow(vid, args.divisions)
         cv2.destroyAllWindows()
         if not meshflow is None:
             np.save(args.video_file, meshflow)
