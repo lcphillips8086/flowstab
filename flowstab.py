@@ -50,18 +50,18 @@ def flow_index(x, y, img):
     i = int(y * 16 / h - 0.5)
     return i, j
 
-def hsv_vis(flow):
+def hsv_vis(flow, scale=8):
     h, w = flow.shape[:2]
     fx, fy = flow[:,:,0], flow[:,:,1]
     r, theta = cv2.cartToPolar(flow[...,0], flow[...,1])
     hsv = np.zeros((h, w, 3), np.uint8)
     hsv[...,0] = theta * 180 / np.pi / 2
     hsv[...,1] = 255
-    hsv[...,2] = np.minimum(r * 8, 255)
+    hsv[...,2] = np.minimum(r * scale, 255)
     img = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
     return img
 
-def compute_meshflow(vid, divs):
+def compute_meshflow(vid, args):
     vid_length = vid.get(cv2.CAP_PROP_FRAME_COUNT)
     meshflow = np.zeros((int(vid_length), 16, 16, 2))
 
@@ -69,6 +69,12 @@ def compute_meshflow(vid, divs):
     frame_count = 0
     frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     last_gray = frame_gray.copy()
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    if not args.output_file is None:
+        out = cv2.VideoWriter(args.output_file, fourcc, vid.get(cv2.CAP_PROP_FPS)//2, (int(frame.shape[1]*2), int(frame.shape[0])))
+    else:
+        out = None
     
     while(True):
         _ret, frame = vid.read()
@@ -76,7 +82,7 @@ def compute_meshflow(vid, divs):
             return meshflow
         frame_count += 1
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        last_points, segments = rich_features(last_gray, divs)
+        last_points, segments = rich_features(last_gray, args.divisions)
         new_points, st, _err = cv2.calcOpticalFlowPyrLK(last_gray, frame_gray, last_points, None, **lk_params)
         reverse_points, st, _err = cv2.calcOpticalFlowPyrLK(frame_gray, last_gray, new_points, None, **lk_params)
         d = abs(last_points-reverse_points).reshape(-1,2).max(-1)
@@ -161,6 +167,8 @@ def compute_meshflow(vid, divs):
         meshflow_vis = hsv_vis(meshflow_interp)
         cv2.imshow('hsv', meshflow_vis)
         cv2.imshow('points', vis)
+        if not out is None:
+            out.write(np.hstack((vis, meshflow_vis)))
         ch = cv2.waitKey(50)
         if ch == 27:
             break
@@ -175,6 +183,7 @@ def main():
     argparser.add_argument('-s', '--scale', help="Gaussian kernel size", type=int, default=10)
     argparser.add_argument('-c', '--crop', help="Crop output", type=int, default=10)
     argparser.add_argument('-d', '--divisions', help="Feature detection divisions", type=int, default=1)
+    argparser.add_argument('-v', '--visualize', help="Output visualization instead of result", action='store_true')
     args = argparser.parse_args()
 
     # open input
@@ -183,7 +192,7 @@ def main():
     height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     if args.flow is None:
-        meshflow = compute_meshflow(vid, args.divisions)
+        meshflow = compute_meshflow(vid, args)
         cv2.destroyAllWindows()
         if not meshflow is None:
             np.save(args.video_file, meshflow)
@@ -192,11 +201,12 @@ def main():
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         if not args.output_file is None:
-            out1 = cv2.VideoWriter(args.output_file, fourcc, 20.0, (width-2*args.crop, height-2*args.crop))
+            if args.visualize == False:
+                out = cv2.VideoWriter(args.output_file, fourcc, vid.get(cv2.CAP_PROP_FPS), (width-2*args.crop, height-2*args.crop))
+            else:
+                out = cv2.VideoWriter(args.output_file, fourcc, vid.get(cv2.CAP_PROP_FPS), (width*2, height*2))
         else:
-            out1 = None
-        #out2 = cv2.VideoWriter('out2.mp4', fourcc, 20.0, (width, height))
-        #out3 = cv2.VideoWriter('out3.mp4', fourcc, 20.0, (width, height))
+            out = None
 
         virt_paths = np.cumsum(meshflow, axis=0)
         lowpassed = ndimage.filters.gaussian_filter1d(virt_paths, args.scale, axis=0, mode='mirror')
@@ -205,7 +215,7 @@ def main():
 
         for flow, filtered, diff in zip(meshflow, lowpassed2, diff):
             filtered_interp = cv2.resize(filtered, dsize=(width, height), interpolation=cv2.INTER_LINEAR)
-            filtered_vis = hsv_vis(filtered_interp)
+            filtered_vis = hsv_vis(filtered_interp, 32)
             diff_interp = cv2.resize(diff, dsize=(width, height), interpolation=cv2.INTER_LINEAR)
             diff_vis = hsv_vis(diff_interp)
 
@@ -218,18 +228,17 @@ def main():
             cv2.imshow('diff', diff_vis)
             cv2.imshow('source', frame[args.crop:-args.crop,args.crop:-args.crop])
             cv2.imshow('warp', warped[args.crop:-args.crop,args.crop:-args.crop])
-            if not out1 is None:
-                out1.write(warp)
-            #out2.write(filtered_vis)
-            #out3.write(diff_vis)
+            if not out is None:
+                if args.visualize == False:
+                    out.write(warped[args.crop:-args.crop,args.crop:-args.crop])
+                else:
+                    out.write(np.vstack((np.hstack((filtered_vis, diff_vis)),np.hstack((frame, warped)))))
             ch = cv2.waitKey(50)
             if ch == 27:
                 break
 
-        if not out1 is None:
-            out1.release()
-        #out2.release()
-        #out3.release()
+        if not out is None:
+            out.release()
 
     vid.release()
     cv2.destroyAllWindows()
