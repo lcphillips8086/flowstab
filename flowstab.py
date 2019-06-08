@@ -167,11 +167,19 @@ def compute_meshflow(vid, args):
         meshflow_vis = hsv_vis(meshflow_interp)
         cv2.imshow('hsv', meshflow_vis)
         cv2.imshow('points', vis)
+        if frame_count == int(args.pvis):
+            print("Frame {} printed".format(frame_count))
+            cv2.imwrite('hsv.png', meshflow_vis)
+            cv2.imwrite('points.png', vis)
         if not out is None:
             out.write(np.hstack((vis, meshflow_vis)))
         ch = cv2.waitKey(50)
         if ch == 27:
             break
+        elif ch == ord('p'):
+            cv2.imwrite('hsv.png', meshflow_vis)
+            cv2.imwrite('points.png', vis)
+            print("Frame {} printed".format(frame_count))
 
 
 def main():
@@ -184,6 +192,7 @@ def main():
     argparser.add_argument('-c', '--crop', help="Crop output", type=int, default=10)
     argparser.add_argument('-d', '--divisions', help="Feature detection divisions", type=int, default=1)
     argparser.add_argument('-v', '--visualize', help="Output visualization instead of result", action='store_true')
+    argparser.add_argument('-p', '--pvis', help="Print the visualization of the specified tracking frame", default=None)
     args = argparser.parse_args()
 
     # open input
