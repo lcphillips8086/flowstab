@@ -87,7 +87,7 @@ def compute_meshflow(vid, args):
         reverse_points, st, _err = cv2.calcOpticalFlowPyrLK(frame_gray, last_gray, new_points, None, **lk_params)
         d = abs(last_points-reverse_points).reshape(-1,2).max(-1)
         passed = np.logical_and(d < 1, (st.reshape(-1) > 0))
-        global_homography, good = cv2.findHomography(last_points, new_points, cv2.RANSAC, 6)
+        global_homography, good = cv2.findHomography(last_points, new_points, cv2.RANSAC, args.threshold)
         global_points = cv2.perspectiveTransform(last_points, global_homography)
         new_points = global_points.copy()
         new_points, _st, _err = cv2.calcOpticalFlowPyrLK(last_gray, frame_gray, last_points, new_points, **lk_params2)
@@ -95,7 +95,7 @@ def compute_meshflow(vid, args):
         for segment in segments:
             ret_, good = cv2.findHomography(last_points[slice(*segment)], new_points[slice(*segment)], cv2.RANSAC, 2)
             inlier_mask[slice(*segment)] = good[:,0]
-        global_homography, good = cv2.findHomography(last_points, new_points, cv2.RANSAC, 6)
+        global_homography, good = cv2.findHomography(last_points, new_points, cv2.RANSAC, args.threshold)
         global_points = cv2.perspectiveTransform(last_points, global_homography)
 
         np.bitwise_and(inlier_mask, passed)
@@ -167,7 +167,7 @@ def compute_meshflow(vid, args):
         meshflow_vis = hsv_vis(meshflow_interp)
         cv2.imshow('hsv', meshflow_vis)
         cv2.imshow('points', vis)
-        if frame_count == int(args.pvis):
+        if not args.pvis is None and frame_count == int(args.pvis):
             print("Frame {} printed".format(frame_count))
             cv2.imwrite('hsv.png', meshflow_vis)
             cv2.imwrite('points.png', vis)
@@ -193,6 +193,7 @@ def main():
     argparser.add_argument('-d', '--divisions', help="Feature detection divisions", type=int, default=1)
     argparser.add_argument('-v', '--visualize', help="Output visualization instead of result", action='store_true')
     argparser.add_argument('-p', '--pvis', help="Print the visualization of the specified tracking frame", default=None)
+    argparser.add_argument('-t', '--threshold', help="Global homography rejection threshold", type=int, default=6)
     args = argparser.parse_args()
 
     # open input
